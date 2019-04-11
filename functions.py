@@ -78,6 +78,29 @@ class SequenceGen(Dataset):
         y = self.data[r+self.length,1]
         return x[np.newaxis],y
 
+class SequenceGenLM(Dataset):
+    # pretain as language model style. Used as base for fine tune
+    tot = 629145480
+    def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000,predict_len=200):
+        # data is numpy array of (value, time)
+        # data[0:cutoff] used for train, the rest used for validation
+        self.data = data
+        self.IsTrain = IsTrain
+        self.train_cutoff = train_cutoff
+        self.length = length
+        self.predict_len = predict_len
+        self.tot_len = length+predict_len
+        self.index_max = train_cutoff - self.tot_len -1
+        
+    def __len__(self):
+        return int(self.train_cutoff/self.tot_len) if self.IsTrain else int((self.tot - self.train_cutoff)/self.tot_len)-1
+
+    def __getitem__(self, idx):
+        r = np.random.randint(0,self.index_max) if self.IsTrain else (self.train_cutoff + self.tot_len*idx)
+        x = self.data[r:r+self.length,0]
+        y = self.data[r+self.length:r+self.tot_len,0]
+        return x[np.newaxis],y
+
 class SequenceGenTest(Dataset):
     def __init__(self,seg_id):
         # seg_id is a list of seg id from submission file
@@ -126,6 +149,16 @@ class DenseBlock(nn.Module):
     def forward(self, x):
         return self.maxpool(torch.cat([x,self.conv2(self.conv1(x))],1))
     
+class DenseBlock2(nn.Module):
+    # N,D,L to N,2*D,L
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvBatchLeaky1D(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky1D(in_channel*2,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(torch.cat([x,self.conv1(x)],1))
     
 class CNN_RNN2seq(nn.Module):
     def __init__(self,conv,linear):
