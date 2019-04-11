@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch import nn
 import torch
-from pytorch_models import ConvBatchLeaky1D
+from pytorch_models import ConvBatchLeaky1D,ConvGLU
 from scipy.signal import spectrogram
 import pandas as pd
 
@@ -159,6 +159,28 @@ class DenseBlock2(nn.Module):
         
     def forward(self, x):
         return self.conv2(torch.cat([x,self.conv1(x)],1))
+    
+class DenseBlockGLU(nn.Module):
+    # N,D,L to N,2*D,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvGLU(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky1D(in_channel*2,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(torch.cat([x,self.conv1(x)],1))
+
+class ResidualBlockGLU(nn.Module):
+    # N,D,L to N,2*D,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvGLU(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky1D(in_channel,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(x+self.conv1(x))    
     
 class CNN_RNN2seq(nn.Module):
     def __init__(self,conv,linear):
