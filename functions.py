@@ -7,6 +7,7 @@ Created on Sat Mar 30 16:03:44 2019
 """
 import numpy as np
 from torch.utils.data import Dataset
+from torch.nn import Linear
 from torch import nn
 import torch
 from pytorch_models import ConvBatchLeaky1D,ConvGLU,ConvBatchLeaky,Conv2dGLU
@@ -261,6 +262,21 @@ class CNN_RNN2seq(nn.Module):
         x = x.contiguous().view(n,-1)
         x = self.linear(x)
         return x.squeeze(1)    
+
+class CNN_RNN2seq_transpose(nn.Module):
+    def __init__(self,conv,linear):
+        super().__init__()
+        self.conv = conv 
+        self.linear = linear
+        self.convert = Linear(1,1)
+        
+    def forward(self,x):
+        n = x.shape[0]
+        _,x = self.conv(x)
+        x = x.contiguous().view(n*2,-1)
+        x = self.linear(x).squeeze(1)
+        x = x.view(n,2).mean(1,keepdim=True)
+        return self.convert(x).squeeze(1)
 
 def loss_func_generator(distanceFun):
     def loss_func(model,data):
