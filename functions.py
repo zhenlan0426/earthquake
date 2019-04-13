@@ -78,6 +78,28 @@ class SequenceGen(Dataset):
         y = self.data[r+self.length,1]
         return x[np.newaxis],y
 
+# TODO: SequenceGenSample for Test
+class SequenceGenSample(Dataset):
+    tot = 629145480
+    def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000,sample_intval=4):
+        # data is numpy array of (value, time)
+        # data[0:cutoff] used for train, the rest used for validation
+        self.data = data
+        self.IsTrain = IsTrain
+        self.train_cutoff = train_cutoff
+        self.length = length
+        self.sample_intval = sample_intval
+        self.index_max = train_cutoff - length - 1
+        
+    def __len__(self):
+        return int(self.train_cutoff/self.length) if self.IsTrain else int((self.tot - self.train_cutoff)/self.length)-1
+
+    def __getitem__(self, idx):
+        r = np.random.randint(0,self.index_max) if self.IsTrain else self.train_cutoff + self.length*idx
+        x = self.data[r:r+self.length:self.sample_intval,0]
+        y = self.data[r+self.length,1]
+        return x[np.newaxis],y
+    
 class SequenceGenLM(Dataset):
     # pretain as language model style. Used as base for fine tune
     tot = 629145480
