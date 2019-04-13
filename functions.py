@@ -9,7 +9,7 @@ import numpy as np
 from torch.utils.data import Dataset
 from torch import nn
 import torch
-from pytorch_models import ConvBatchLeaky1D,ConvGLU
+from pytorch_models import ConvBatchLeaky1D,ConvGLU,ConvBatchLeaky,Conv2dGLU
 from scipy.signal import spectrogram
 import pandas as pd
 
@@ -203,6 +203,51 @@ class ResidualBlockGLU(nn.Module):
         
     def forward(self, x):
         return self.conv2(x+self.conv1(x))    
+
+class ResidualBlock(nn.Module):
+    # N,D,L to N,2*D,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvBatchLeaky1D(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky1D(in_channel,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(x+self.conv1(x))    
+
+class ResidualBlock3d(nn.Module):
+    # N,C,F,L to N,2*C,F/2,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvBatchLeaky(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky(in_channel,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(x+self.conv1(x))  
+
+class DenseBlock3d(nn.Module):
+    # N,C,F,L to N,2*C,F/2,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvBatchLeaky(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky(in_channel*2,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(torch.cat([x,self.conv1(x)],1))  
+
+class ResidualBlockGLU3d(nn.Module):
+    # N,C,F,L to N,2*C,F/2,L/2
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = Conv2dGLU(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchLeaky(in_channel,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(x+self.conv1(x))  
+    
     
 class CNN_RNN2seq(nn.Module):
     def __init__(self,conv,linear):
