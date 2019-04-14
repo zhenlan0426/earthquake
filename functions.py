@@ -20,10 +20,12 @@ import pandas as pd
 
 normalize = lambda x: np.tanh(x/8-0.6)
 normalize_log = lambda x: np.tanh((np.log(x+1e-8)-2.0801182)/1.6936827)
+normalize2 = lambda x: (x - 4.876247882843018)/6.380820274353027
+normalize_log2 = lambda x: (np.log(x+1e-8)-2.0801182)/1.6936827
 
 class SequenceGenSpec(Dataset):
     tot = 629145480
-    def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000,Is2D=True):
+    def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000,Is2D=True,normalFun=normalize_log):
         # data is numpy array of (value, time)
         # data[0:cutoff] used for train, the rest used for validation
         self.data = data
@@ -32,6 +34,7 @@ class SequenceGenSpec(Dataset):
         self.length = length
         self.index_max = train_cutoff - length - 1
         self.Is2D = Is2D
+        self.normalFun = normalFun        
         
     def __len__(self):
         return int(self.train_cutoff/self.length) if self.IsTrain else int((self.tot - self.train_cutoff)/self.length)-1
@@ -40,15 +43,16 @@ class SequenceGenSpec(Dataset):
         r = np.random.randint(0,self.index_max) if self.IsTrain else self.train_cutoff + self.length*idx
         x = self.data[r:r+self.length,0]
         _,_,x = spectrogram(x,nperseg=256,noverlap=256//4)
-        x = normalize_log(x)
+        x = self.normalFun(x)
         y = self.data[r+self.length,1]
         return (x if self.Is2D else x[np.newaxis]),y
 
 class SequenceGenSpecTest(Dataset):
-    def __init__(self,seg_id,Is2D=True):
+    def __init__(self,seg_id,normalFun,Is2D=True):
         # seg_id is a list of seg id from submission file
         self.seg_id = seg_id
         self.Is2D = Is2D
+        self.normalFun = normalFun
         
     def __len__(self):
         return len(self.seg_id)
@@ -56,7 +60,7 @@ class SequenceGenSpecTest(Dataset):
     def __getitem__(self, idx):
         x = pd.read_csv('../Data/test/'+self.seg_id[idx]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
         _,_,x = spectrogram(x,nperseg=256,noverlap=256//4)
-        x = normalize_log(x)
+        x = self.normalFun(x)
         return (x if self.Is2D else x[np.newaxis])
 
 class SequenceGen(Dataset):
@@ -79,7 +83,6 @@ class SequenceGen(Dataset):
         y = self.data[r+self.length,1]
         return x[np.newaxis],y
 
-# TODO: SequenceGenSample for Test
 class SequenceGenSample(Dataset):
     tot = 629145480
     def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000,sample_intval=4):
@@ -93,10 +96,15 @@ class SequenceGenSample(Dataset):
         self.index_max = train_cutoff - length - 1
         
     def __len__(self):
-        return int(self.train_cutoff/self.length) if self.IsTrain else int((self.tot - self.train_cutoff)/self.length)-1
+        return int(self.train_cutoff/self.length) if self.IsTrain else (int((self.tot - self.train_cutoff)/self.length)-1)*self.sample_intval
 
     def __getitem__(self, idx):
-        r = np.random.randint(0,self.index_max) if self.IsTrain else self.train_cutoff + self.length*idx
+        if self.IsTrain:
+            r = np.random.randint(0,self.index_max)
+        else:
+            i = idx//self.sample_intval
+            j = idx%self.sample_intval
+            r = self.train_cutoff + self.length*i + j
         x = self.data[r:r+self.length:self.sample_intval,0]
         y = self.data[r+self.length,1]
         return x[np.newaxis],y
@@ -125,16 +133,32 @@ class SequenceGenLM(Dataset):
         return x[np.newaxis],y
 
 class SequenceGenTest(Dataset):
-    def __init__(self,seg_id):
+    def __init__(self,seg_id,normalFun):
         # seg_id is a list of seg id from submission file
         self.seg_id = seg_id
+        self.normalFun = normalFun
         
     def __len__(self):
         return len(self.seg_id)
     
     def __getitem__(self, idx):
         x = pd.read_csv('../Data/test/'+self.seg_id[idx]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
-        x = normalize(x)
+        x = self.normalFun(x)
+        return x[np.newaxis]
+ 
+class SequenceGenTestSample(Dataset):
+    def __init__(self,seg_id,normalFun,sample_intval=4):
+        # seg_id is a list of seg id from submission file
+        self.seg_id = seg_id
+        self.sample_intval = sample_intval
+        self.normalFun = normalFun
+        
+    def __len__(self):
+        return len(self.seg_id) * self.sample_intval
+    
+    def __getitem__(self, idx):
+        x = pd.read_csv('../Data/test/'+self.seg_id[idx//self.sample_intval]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
+        x = self.normalFun(x[idx%self.sample_intval::self.sample_intval])
         return x[np.newaxis]
     
 class SequenceGenNojump(Dataset):
