@@ -6,11 +6,12 @@ Created on Sat Mar 30 16:03:44 2019
 @author: will
 """
 import numpy as np
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset,DataLoader
 from torch.nn import Linear
 from torch import nn
 import torch
-from pytorch_models import ConvBatchLeaky1D,ConvGLU,ConvBatchLeaky,Conv2dGLU
+from pytorch_models import ConvBatchLeaky1D,ConvGLU,ConvBatchLeaky,Conv2dGLU,ConvBatchRRelu1D
+from pytorch_util import predict,wrapTrainGen2TestGen
 from scipy.signal import spectrogram
 import pandas as pd
 
@@ -22,6 +23,21 @@ normalize = lambda x: np.tanh(x/8-0.6)
 normalize_log = lambda x: np.tanh((np.log(x+1e-8)-2.0801182)/1.6936827)
 normalize2 = lambda x: (x - 4.876247882843018)/6.380820274353027
 normalize_log2 = lambda x: (np.log(x+1e-8)-2.0801182)/1.6936827
+
+class weightedAverageGen(Dataset):
+    def __init__(self,filePath,y_path=None):
+        # seg_id is a list of seg id from submission file
+        self.xs = np.stack([np.load(file) for file in filePath],1)
+        if y_path is not None:
+            self.y = np.load(y_path)
+        else:
+            self.y = None
+        
+    def __len__(self):
+        return self.xs.shape[0]
+    
+    def __getitem__(self, idx):
+        return self.xs[idx] if self.y is None else (self.xs[idx], self.y[idx])
 
 class SequenceGenSpec(Dataset):
     tot = 629145480
@@ -229,6 +245,17 @@ class ResidualBlockGLU(nn.Module):
     def forward(self, x):
         return self.conv2(x+self.conv1(x))    
 
+class ResidualBlockRRelu(nn.Module):
+    # N,D,L to N,2*D,L
+    def __init__(self, in_channel):
+        super().__init__()
+        self.in_channel = in_channel
+        self.conv1 = ConvBatchRRelu1D(in_channel,in_channel,3,padding=1)
+        self.conv2 = ConvBatchRRelu1D(in_channel,in_channel*2,3,stride=2)
+        
+    def forward(self, x):
+        return self.conv2(x+self.conv1(x))
+
 class ResidualBlock(nn.Module):
     # N,D,L to N,2*D,L/2
     def __init__(self, in_channel):
@@ -309,3 +336,39 @@ def loss_func_generator(distanceFun):
         loss = distanceFun(yhat,y)
         return loss
     return loss_func
+
+
+def make_submission_sample(name,model,normalFun,batch_size):
+    submission = pd.read_csv('../Data/sample_submission.csv',)
+    test_gen = SequenceGenTestSample(submission.seg_id.tolist(),normalFun)
+    test_gen = DataLoader(test_gen,batch_size,False,num_workers=2)
+    yhat = np.maximum(predict(model,test_gen),0)
+    submission.iloc[:,1] = np.median(yhat.reshape(-1,4),1)
+    submission.to_csv('../Submission/'+name+'.csv',index=False)
+    
+def make_submission(name,model,normalFun,batch_size):
+    submission = pd.read_csv('../Data/sample_submission.csv')
+    test_gen = SequenceGenSpecTest(submission.seg_id.tolist(),normalFun)
+    test_gen = DataLoader(test_gen,batch_size,False,num_workers=2)
+    submission.iloc[:,1] = np.maximum(predict(model,test_gen),0)
+    submission.to_csv('../Submission/'+name+'.csv',index=False)
+     
+def save_ModelandValidation(model,val_gen,name):
+    yhat = predict(model,wrapTrainGen2TestGen(val_gen))
+    np.save('../Model/'+name+'.npy', yhat)
+    torch.save(model.state_dict(), '../Model/'+name+'.pt')
+        
+def save_ModelandValidation_sample(model,val_gen,name):
+    yhat = predict(model,wrapTrainGen2TestGen(val_gen))
+    np.save('../Model/'+name+'.npy', np.median(yhat.reshape(-1,4),1))
+    torch.save(model.state_dict(), '../Model/'+name+'.pt')    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
