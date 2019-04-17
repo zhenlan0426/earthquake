@@ -11,7 +11,7 @@ from torch.nn import Linear
 from torch import nn
 import torch
 from pytorch_models import ConvBatchLeaky1D,ConvGLU,ConvBatchLeaky,Conv2dGLU,ConvBatchRRelu1D
-from pytorch_util import predict,wrapTrainGen2TestGen
+from pytorch_util import predict
 from scipy.signal import spectrogram
 import pandas as pd
 
@@ -199,7 +199,54 @@ class SequenceGenNojump(Dataset):
         x = self.data[r:r+self.length,0]
         y = self.data[r+self.length,1]
         return x[np.newaxis],y
-    
+
+
+class SequenceGenBoostSample(Dataset):
+    def __init__(self,data,start,iteration,length=150000,sample_intval=4,returnY=False):
+        self.data = data
+        self.start = start
+        self.iteration = iteration
+        self.length = length
+        self.sample_intval = sample_intval
+        self.returnY = returnY
+        
+    def __len__(self):
+        return self.iteration * self.sample_intval
+
+    def __getitem__(self, idx):
+        i = idx//self.sample_intval
+        j = idx%self.sample_intval
+        r = self.start + self.length*i + j
+        x = self.data[r:r+self.length:self.sample_intval,0]
+        return (x[np.newaxis],self.data[r+self.length,1]) if self.returnY else x[np.newaxis]
+
+
+class SequenceGenSpecBoost(Dataset):
+    def __init__(self,data,start,iteration,length=150000,Is2D=True,normalFun=normalize_log,returnY=False):
+        # data is numpy array of (value, time)
+        # data[0:cutoff] used for train, the rest used for validation
+        self.data = data
+        self.start = start
+        self.iteration = iteration
+        self.length = length
+        self.Is2D = Is2D
+        self.normalFun = normalFun        
+        self.returnY = returnY
+        
+    def __len__(self):
+        return self.iteration
+
+    def __getitem__(self, idx):
+        r = self.start + self.length*idx
+        x = self.data[r:r+self.length,0]
+        _,_,x = spectrogram(x,nperseg=256,noverlap=256//4)
+        x = self.normalFun(x)
+        x = x if self.Is2D else x[np.newaxis]
+        y = self.data[r+self.length,1]
+        return (x,y) if self.returnY else x
+
+''' build models '''    
+
 class DenseBlock(nn.Module):
     # N,D,L to N,2*D,L
     def __init__(self, in_channel):
@@ -339,7 +386,7 @@ def loss_func_generator(distanceFun):
 
 
 def make_submission_sample(name,model,normalFun,batch_size):
-    submission = pd.read_csv('../Data/sample_submission.csv',)
+    submission = pd.read_csv('../Data/sample_submission.csv')
     test_gen = SequenceGenTestSample(submission.seg_id.tolist(),normalFun)
     test_gen = DataLoader(test_gen,batch_size,False,num_workers=2)
     yhat = np.maximum(predict(model,test_gen),0)
@@ -353,14 +400,26 @@ def make_submission(name,model,normalFun,batch_size):
     submission.iloc[:,1] = np.maximum(predict(model,test_gen),0)
     submission.to_csv('../Submission/'+name+'.csv',index=False)
      
-def save_ModelandValidation(model,val_gen,name):
-    yhat = predict(model,wrapTrainGen2TestGen(val_gen))
-    np.save('../Model/'+name+'.npy', yhat)
-    torch.save(model.state_dict(), '../Model/'+name+'.pt')
+def save_ModelandValidation_spec(model,train,name,normalFun,batch_size=16):
+    train_gen = SequenceGenSpecBoost(train,0,int(500000000/150000),normalFun=normalFun)
+    train_gen = DataLoader(train_gen,batch_size,False)
+    val_gen = SequenceGenSpecBoost(train,500000000,int((train.shape[0] - 500000000)/150000)-1,normalFun=normalFun)
+    val_gen = DataLoader(val_gen,batch_size,False)
+    ytrain = predict(model,train_gen)
+    yval = predict(model,val_gen)
+    np.save('../Model/'+name+'_train.npy', ytrain)
+    np.save('../Model/'+name+'_val.npy', yval)     
+    torch.save(model.state_dict(), '../Model/'+name+'.pt')  
         
-def save_ModelandValidation_sample(model,val_gen,name):
-    yhat = predict(model,wrapTrainGen2TestGen(val_gen))
-    np.save('../Model/'+name+'.npy', np.median(yhat.reshape(-1,4),1))
+def save_ModelandValidation_Raw(model,train,name,batch_size=16):
+    train_gen = SequenceGenBoostSample(train,0,int(500000000/150000))
+    train_gen = DataLoader(train_gen,batch_size,False)
+    val_gen = SequenceGenBoostSample(train,500000000,int((train.shape[0] - 500000000)/150000)-1)
+    val_gen = DataLoader(val_gen,batch_size,False)
+    ytrain = predict(model,train_gen)
+    yval = predict(model,val_gen)
+    np.save('../Model/'+name+'_train.npy', np.median(ytrain.reshape(-1,4),1))
+    np.save('../Model/'+name+'_val.npy', np.median(yval.reshape(-1,4),1)) 
     torch.save(model.state_dict(), '../Model/'+name+'.pt')    
     
     
