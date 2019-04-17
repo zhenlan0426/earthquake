@@ -222,7 +222,7 @@ class SequenceGenBoostSample(Dataset):
 
 
 class SequenceGenSpecBoost(Dataset):
-    def __init__(self,data,start,iteration,length=150000,Is2D=True,normalFun=normalize_log,returnY=False):
+    def __init__(self,data,start,iteration,length=150000,Is2D=True,normalFun=normalize_log,returnY=False,yhat=None):
         # data is numpy array of (value, time)
         # data[0:cutoff] used for train, the rest used for validation
         self.data = data
@@ -232,6 +232,7 @@ class SequenceGenSpecBoost(Dataset):
         self.Is2D = Is2D
         self.normalFun = normalFun        
         self.returnY = returnY
+        self.yhat = yhat
         
     def __len__(self):
         return self.iteration
@@ -243,7 +244,10 @@ class SequenceGenSpecBoost(Dataset):
         x = self.normalFun(x)
         x = x if self.Is2D else x[np.newaxis]
         y = self.data[r+self.length,1]
-        return (x,y) if self.returnY else x
+        if self.yhat is None:
+            return (x,y) if self.returnY else x
+        else:
+            return x,self.yhat[idx],y
 
 ''' build models '''    
 
@@ -384,6 +388,13 @@ def loss_func_generator(distanceFun):
         return loss
     return loss_func
 
+def loss_func_generator_xgb(distanceFun):
+    def loss_func(model,data):
+        X,yhat,y = data
+        yhat2 = model(X)+yhat
+        loss = distanceFun(yhat2,y)
+        return loss
+    return loss_func
 
 def make_submission_sample(name,model,normalFun,batch_size):
     submission = pd.read_csv('../Data/sample_submission.csv')
