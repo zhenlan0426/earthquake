@@ -79,6 +79,43 @@ class SequenceGenSpecTest(Dataset):
         x = self.normalFun(x)
         return (x if self.Is2D else x[np.newaxis])
 
+class SequenceGenTransform(Dataset):
+    # more general version of SequenceGenSpec, keep SequenceGenSpec for backward usage
+    # combine normalize and spec
+    tot = 629145480
+    def __init__(self,data,transformFun,IsTrain=True,train_cutoff=500000000,length=150000):
+
+        self.data = data
+        self.transformFun = transformFun
+        self.IsTrain = IsTrain
+        self.train_cutoff = train_cutoff
+        self.length = length
+        self.index_max = train_cutoff - length - 1
+        
+    def __len__(self):
+        return int(self.train_cutoff/self.length) if self.IsTrain else int((self.tot - self.train_cutoff)/self.length)-1
+
+    def __getitem__(self, idx):
+        r = np.random.randint(0,self.index_max) if self.IsTrain else self.train_cutoff + self.length*idx
+        x = self.data[r:r+self.length,0]
+        x = self.transformFun(x)
+        y = self.data[r+self.length,1]
+        return x.astype(np.float32),y
+
+class SequenceGenTransformTest(Dataset):
+    def __init__(self,seg_id,transformFun):
+        # seg_id is a list of seg id from submission file
+        self.seg_id = seg_id
+        self.transformFun = transformFun
+        
+    def __len__(self):
+        return len(self.seg_id)
+
+    def __getitem__(self, idx):
+        x = pd.read_csv('../Data/test/'+self.seg_id[idx]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
+        x = self.transformFun(x)
+        return x.astype(np.float32)
+
 class SequenceGen(Dataset):
     tot = 629145480
     def __init__(self,data,IsTrain=True,train_cutoff=500000000,length=150000):
@@ -161,7 +198,38 @@ class SequenceGenTest(Dataset):
         x = pd.read_csv('../Data/test/'+self.seg_id[idx]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
         x = self.normalFun(x)
         return x[np.newaxis]
- 
+
+class SequenceGenTestY(Dataset):
+    def __init__(self,seg_id,transformFun):
+        # seg_id is df, as in submission file
+        self.seg_id = seg_id
+        self.transformFun = transformFun
+        self.n = self.seg_id.shape[0]
+        
+    def __len__(self):
+        return self.n
+    
+    def __getitem__(self, idx):
+        idx = np.random.randint(0,self.n)
+        x = pd.read_csv('../Data/test/'+self.seg_id.iloc[idx,0]+'.csv',dtype={'acoustic_data': np.float32}).values.flatten()
+        x = self.transformFun(x)
+        y = self.seg_id.iloc[idx,1]
+        return x.astype(np.float32),y.astype(np.float32)
+
+class SequenceCombine(Dataset):
+    def __init__(self,genList,pList):
+        # genList is a list of Dataset
+        self.genList = genList
+        self.pList = pList
+        self.n = len(pList)
+        
+    def __len__(self):
+        return max([len(gen) for gen in self.genList])
+    
+    def __getitem__(self, idx):
+        i = np.random.choice(self.n,p=self.pList)
+        return self.genList[i][idx]
+
 class SequenceGenTestSample(Dataset):
     def __init__(self,seg_id,normalFun,sample_intval=4):
         # seg_id is a list of seg id from submission file
